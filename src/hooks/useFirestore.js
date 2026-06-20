@@ -26,20 +26,26 @@ export function usePlayers() {
   return { players, loading }
 }
 
-export function usePlayer(playerId) {
+// FIX: lookup now matches by playerCode OR by raw Firestore document ID.
+// Root cause of "player not found" for older players: playerCode was added
+// later, so players created before that change have no playerCode field.
+// Matching on doc ID as well means every player — old or new — resolves
+// correctly, with zero changes to existing data.
+export function usePlayer(playerIdOrCode) {
   const [player, setPlayer] = useState(null)
   const [loading, setLoading] = useState(true)
   useEffect(() => {
-    if (!playerId) return
-    // Find by playerCode field
+    if (!playerIdOrCode) return
     const q = query(collection(db, 'players'))
     const unsub = onSnapshot(q, snap => {
-      const found = snap.docs.find(d => d.data().playerCode === playerId)
+      const found = snap.docs.find(
+        d => d.id === playerIdOrCode || d.data().playerCode === playerIdOrCode
+      )
       setPlayer(found ? { id: found.id, ...found.data() } : null)
       setLoading(false)
     })
     return () => unsub()
-  }, [playerId])
+  }, [playerIdOrCode])
   return { player, loading }
 }
 
