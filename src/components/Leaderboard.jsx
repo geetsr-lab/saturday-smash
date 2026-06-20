@@ -1,7 +1,8 @@
 import { calculateBadges } from '../lib/badges'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { doc, updateDoc } from 'firebase/firestore'
 import { db } from '../lib/firebase'
+import { openWhatsApp, copyToClipboard } from '../lib/share'
 
 // Auto-fix old players that have wins but 0 ratingPoints
 async function backfillRatingPoints(players) {
@@ -20,12 +21,18 @@ async function backfillRatingPoints(players) {
   }
 }
 
+// FIX: was window.open(..., '_blank') which mobile browsers (esp. iOS
+// Safari / in-app browsers) frequently block as a popup, causing the
+// "message disappears / WhatsApp opens empty" bug. location.href is the
+// reliable cross-platform approach (Android, iPhone, WhatsApp Web).
 export function sharePlayerAchievement(player, players, achievement) {
   const text = `🏸 *Saturday Smash*\n\n${achievement.icon} *${player.name}* earned *${achievement.label}*!\n\n📊 Stats:\n✅ Wins: ${player.wins||0}\n❌ Losses: ${player.losses||0}\n⭐ Rating: ${player.ratingPoints||((player.wins||0)*10)} pts\n🔥 Streak: ${player.streak||0}\n\n_Saturday Smash Badminton League_ 🏸`
-  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank')
+  openWhatsApp(text)
 }
 
-export function shareLeaderboard(players) {
+// Single source of truth for the Top-5 share text — used by both the
+// WhatsApp button and the Copy button so they can never drift out of sync.
+function buildLeaderboardText(players) {
   const top5 = [...players].sort((a,b) => getPoints(b) - getPoints(a)).slice(0, 5)
   const rows = top5.map((p, i) => {
     const medals = ['🥇','🥈','🥉','4️⃣','5️⃣']
@@ -33,8 +40,11 @@ export function shareLeaderboard(players) {
     const pct = total > 0 ? Math.round((p.wins/total)*100) : 0
     return `${medals[i]} ${p.name} — ${getPoints(p)} pts | ${p.wins||0}W (${pct}%)`
   }).join('\n')
-  const text = `🏸 *Saturday Smash — Top 5*\n\n${rows}\n\n_Updated live every Saturday!_ 🔥`
-  window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank')
+  return `🏸 *Saturday Smash — Top 5*\n\n${rows}\n\n_Updated live every Saturday!_ 🔥`
+}
+
+export function shareLeaderboard(players) {
+  openWhatsApp(buildLeaderboardText(players))
 }
 
 // Safely get points — fallback to wins×10 for old players
@@ -44,6 +54,8 @@ function getPoints(player) {
 }
 
 export default function Leaderboard({ players }) {
+  const [copied, setCopied] = useState(false)
+
   // Auto-backfill rating points for existing players on first load
   useEffect(() => {
     if (players.length > 0) backfillRatingPoints(players)
@@ -60,6 +72,15 @@ export default function Leaderboard({ players }) {
   const sorted = [...players].sort((a, b) => getPoints(b) - getPoints(a))
   const mvp = sorted[0]
   const streakLeader = [...players].sort((a,b) => (b.streak||0) - (a.streak||0))[0]
+
+  function handleShareLeaderboard() {
+    shareLeaderboard(players)
+  }
+
+  async function handleCopyLeaderboard() {
+    const ok = await copyToClipboard(buildLeaderboardText(players))
+    if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2000) }
+  }
 
   return (
     <div className="space-y-4">
@@ -79,11 +100,17 @@ export default function Leaderboard({ players }) {
         </div>
       </div>
 
-      {/* Share button */}
-      <button onClick={() => shareLeaderboard(players)}
-        className="w-full bg-green-600/20 hover:bg-green-600/30 border border-green-500/40 text-green-400 font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-        📲 Share Top 5 on WhatsApp
-      </button>
+      {/* Share buttons */}
+      <div className="flex gap-2">
+        <button onClick={handleShareLeaderboard}
+          className="flex-1 bg-green-600/20 hover:bg-green-600/30 border border-green-500/40 text-green-400 font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+          📲 Share Top 5
+        </button>
+        <button onClick={handleCopyLeaderboard}
+          className="bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium text-sm px-4 rounded-xl transition-colors">
+          {copied ? '✓ Copied!' : '📋 Copy'}
+        </button>
+      </div>
 
       {/* Standings table */}
       <div className="bg-slate-800 rounded-2xl border border-slate-700 overflow-hidden">
@@ -120,7 +147,7 @@ export default function Leaderboard({ players }) {
                   {/* Name */}
                   <div className="col-span-5">
                     <a
-                      href={player.playerCode ? `/player/${player.playerCode}` : '#'}
+                      href={`/player/${player.playerCode || player.id}`}
                       className="text-white font-bold text-base hover:text-yellow-400 transition-colors block"
                     >
                       {player.name}

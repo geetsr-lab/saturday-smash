@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { createSession, markAttendance, removeAttendance } from '../hooks/useFirestore'
+import { openWhatsApp, copyToClipboard } from '../lib/share'
 
 export default function Sessions({ sessions, players, matches }) {
   const [newTitle, setNewTitle] = useState('')
   const [loading, setLoading] = useState(false)
   const [activeSession, setActiveSession] = useState(null)
+  const [copiedId, setCopiedId] = useState(null)
 
   async function handleCreate() {
     if (!newTitle.trim()) return
@@ -46,8 +48,9 @@ export default function Sessions({ sessions, players, matches }) {
     return mvpPlayer ? { ...mvpPlayer, sessionWins: mvpWins } : null
   }
 
-  // Share session summary
-  function shareSession(session) {
+  // Builds the share text without side effects — used by both the
+  // WhatsApp share and the copy-to-clipboard fallback.
+  function buildSessionSummaryText(session) {
     const mvp = getSessionMVP(session)
     const sessionMatches = matches.filter(m => m.sessionId === session.id)
     const sorted = [...players].sort((a,b) => (b.ratingPoints||0)-(a.ratingPoints||0))
@@ -66,7 +69,7 @@ export default function Sessions({ sessions, players, matches }) {
     // Longest streak in session
     let streakLeader = [...players].sort((a,b)=>(b.streak||0)-(a.streak||0))[0]
 
-    const text = `🏸 *${session.title}*\n\n` +
+    return `🏸 *${session.title}*\n\n` +
       `🏆 MVP: ${mvp ? mvp.name + ` (${mvp.sessionWins} wins)` : 'TBD'}\n` +
       `🔥 Hot Streak: ${streakLeader ? streakLeader.name + ` (${streakLeader.streak||0})` : '-'}\n` +
       `👑 Rank #1: ${rank1 ? rank1.name : '-'}\n` +
@@ -74,7 +77,18 @@ export default function Sessions({ sessions, players, matches }) {
       `🎮 Matches Played: ${sessionMatches.length}\n` +
       `👥 Players Present: ${(session.attendees||[]).length}\n\n` +
       `_Saturday Smash 🏸_`
-    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank')
+  }
+
+  // FIX: was window.open(..., '_blank') — blocked by mobile browser popup
+  // rules, causing the empty/disappearing WhatsApp message bug.
+  // location.href (inside openWhatsApp) is reliable on Android, iPhone, and Web.
+  function shareSession(session) {
+    openWhatsApp(buildSessionSummaryText(session))
+  }
+
+  async function copySessionSummary(session) {
+    const ok = await copyToClipboard(buildSessionSummaryText(session))
+    if (ok) { setCopiedId(session.id); setTimeout(() => setCopiedId(null), 2000) }
   }
 
   const expandedSession = sessions.find(s => s.id === activeSession)
@@ -118,6 +132,22 @@ export default function Sessions({ sessions, players, matches }) {
 
             {isOpen && (
               <div className="px-5 pb-5 border-t border-slate-700 pt-4 space-y-4">
+                {/* Explicit stats row: Attendance Count / Matches Played / MVP */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-slate-900 rounded-xl p-3 text-center">
+                    <div className="text-xl font-black text-blue-400">{(session.attendees||[]).length}</div>
+                    <div className="text-slate-500 text-xs mt-0.5">Attendance</div>
+                  </div>
+                  <div className="bg-slate-900 rounded-xl p-3 text-center">
+                    <div className="text-xl font-black text-green-400">{sessionMatches.length}</div>
+                    <div className="text-slate-500 text-xs mt-0.5">Matches Played</div>
+                  </div>
+                  <div className="bg-slate-900 rounded-xl p-3 text-center">
+                    <div className="text-xl font-black text-yellow-400 truncate">{mvp ? mvp.name : '—'}</div>
+                    <div className="text-slate-500 text-xs mt-0.5">MVP</div>
+                  </div>
+                </div>
+
                 {/* MVP banner */}
                 {mvp && (
                   <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-xl p-3 text-center">
@@ -146,11 +176,17 @@ export default function Sessions({ sessions, players, matches }) {
                   </div>
                 </div>
 
-                {/* Share */}
-                <button onClick={() => shareSession(session)}
-                  className="w-full bg-green-600/20 hover:bg-green-600/30 border border-green-500/40 text-green-400 font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
-                  📲 Share Session Summary on WhatsApp
-                </button>
+                {/* Share — WhatsApp + copy fallback */}
+                <div className="space-y-2">
+                  <button onClick={() => shareSession(session)}
+                    className="w-full bg-green-600/20 hover:bg-green-600/30 border border-green-500/40 text-green-400 font-bold py-3 rounded-xl transition-colors flex items-center justify-center gap-2">
+                    📲 Share Session Summary on WhatsApp
+                  </button>
+                  <button onClick={() => copySessionSummary(session)}
+                    className="w-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium text-sm py-2.5 rounded-xl transition-colors">
+                    {copiedId === session.id ? '✓ Copied!' : '📋 Copy Message'}
+                  </button>
+                </div>
               </div>
             )}
           </div>

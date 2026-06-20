@@ -62,14 +62,19 @@ export default function RecordMatch({ players, sessions }) {
     <div className="bg-slate-800 rounded-2xl p-6 border border-slate-700">
       <h2 className="text-xl font-bold text-white mb-4">🏸 Record Match</h2>
 
-      {/* Session picker */}
+      {/* Session picker — strongly recommended so matches link to sessions correctly */}
       {sessions?.length > 0 && (
         <div className="mb-4">
-          <label className="text-slate-400 text-sm font-medium mb-1 block">📅 Session (optional)</label>
+          <label className="text-slate-300 text-sm font-bold mb-1 block">
+            📅 Session <span className="text-yellow-400">(select this so the match counts toward a session!)</span>
+          </label>
           <select value={sessionId} onChange={e => setSessionId(e.target.value)} className={sel}>
-            <option value="">No session</option>
+            <option value="">No session (won't count in Sessions tab)</option>
             {sessions.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
           </select>
+          {!sessionId && (
+            <p className="text-orange-400 text-xs mt-1">⚠️ Without a session selected, this match won't show up under any session's match count.</p>
+          )}
         </div>
       )}
 
